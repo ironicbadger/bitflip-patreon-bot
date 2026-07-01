@@ -36,6 +36,7 @@ export interface PatronRecord {
   campaignLifetimeSupportCents: number | null;
   tierIds: string[];
   tierTitles: string[];
+  tierAmountsCents: number[];
   roleIds: string[];
   lastSeenAt: string;
 }

@@ -1,4 +1,5 @@
-import { Client, Guild, Role } from "discord.js";
+import { Client, Guild, Role, escapeMarkdown } from "discord.js";
+import type { GuildBasedChannel } from "discord.js";
 import type { AppDatabase } from "./database";
 import type { Logger } from "./logger";
 import type { PatreonClient } from "./patreonClient";
@@ -8,6 +9,9 @@ interface SyncServiceOptions {
   guildId: string;
   dryRun: boolean;
   tierRoleMap: Map<string, string[]>;
+  manageDiscordRoles: boolean;
+  announcementsEnabled: boolean;
+  announcementChannelName: string;
 }
 
 interface DesiredGrant {
@@ -15,6 +19,25 @@ interface DesiredGrant {
   roleId: string;
   memberId: string;
 }
+
+interface PatronAnnouncement {
+  member: PatreonMember;
+  content: string;
+  mentionedUserIds: string[];
+}
+
+interface SendableChannel {
+  send(message: { content: string; allowedMentions: { users: string[] } }): Promise<unknown>;
+}
+
+const ACTIVE_PATRON_ANNOUNCEMENT = "active_patron";
+const DOUGLAS_ADAMS_QUOTES = [
+  "Don't panic.",
+  "Mostly harmless.",
+  "Time is an illusion.",
+  "Life. Don't talk to me about life.",
+  "So long, and thanks for all the fish."
+] as const;
 
 export class SyncService {
   private inFlight: Promise<SyncRunInput> | null = null;
@@ -60,18 +83,29 @@ export class SyncService {
       totalMembers = members.length;
 
       const now = new Date().toISOString();
+      const hadPreviousSync = Boolean(this.database.getLatestSyncRun());
+      const announcements = this.options.announcementsEnabled
+        ? this.newActivePatronAnnouncements(members, hadPreviousSync)
+        : [];
       const records = members.map((member) => this.toPatronRecord(member, now));
       this.database.upsertPatrons(records);
 
-      const desired = this.desiredGrants(members);
       eligibleMembers = members.filter((member) => this.isEligible(member)).length;
       linkedMembers = members.filter((member) => this.isEligible(member) && member.discordUserId).length;
-      desiredRoleGrants = desired.length;
 
-      const result = await this.applyRoleChanges(guild, desired, dryRun, errors);
-      rolesAdded = result.rolesAdded;
-      rolesRemoved = result.rolesRemoved;
-      skipped = result.skipped;
+      if (this.options.manageDiscordRoles) {
+        const desired = this.desiredGrants(members);
+        desiredRoleGrants = desired.length;
+
+        const result = await this.applyRoleChanges(guild, desired, dryRun, errors);
+        rolesAdded = result.rolesAdded;
+        rolesRemoved = result.rolesRemoved;
+        skipped = result.skipped;
+      } else {
+        this.logger.info("Discord role management disabled; leaving Patreon roles to the official Patreon bot");
+      }
+
+      await this.announceNewPatrons(guild, announcements, dryRun, errors);
 
       const syncRun: SyncRunInput = {
         startedAt,
@@ -119,7 +153,12 @@ export class SyncService {
 
   private async fetchGuild(): Promise<Guild> {
     const guild = await this.client.guilds.fetch(this.options.guildId);
-    await guild.roles.fetch();
+    if (this.options.manageDiscordRoles) {
+      await guild.roles.fetch();
+    }
+    if (this.options.announcementsEnabled) {
+      await guild.channels.fetch();
+    }
     return guild;
   }
 
@@ -159,6 +198,114 @@ export class SyncService {
 
   private isEligible(member: PatreonMember): boolean {
     return member.patronStatus === "active_patron" && member.tiers.length > 0;
+  }
+
+  private isEligibleRecord(record: PatronRecord): boolean {
+    return record.patronStatus === "active_patron" && record.tierIds.length > 0;
+  }
+
+  private newActivePatronAnnouncements(members: PatreonMember[], hadPreviousSync: boolean): PatronAnnouncement[] {
+    const announcements: PatronAnnouncement[] = [];
+
+    for (const member of members) {
+      if (!this.isEligible(member)) {
+        continue;
+      }
+      if (this.database.hasPatronAnnouncement(member.id, ACTIVE_PATRON_ANNOUNCEMENT)) {
+        continue;
+      }
+
+      const previous = this.database.getPatronByMemberId(member.id);
+      if (!previous && !hadPreviousSync) {
+        continue;
+      }
+      if (previous && this.isEligibleRecord(previous)) {
+        continue;
+      }
+
+      announcements.push(this.buildPatronAnnouncement(member));
+    }
+
+    return announcements;
+  }
+
+  private buildPatronAnnouncement(member: PatreonMember): PatronAnnouncement {
+    const quote = DOUGLAS_ADAMS_QUOTES[Math.floor(Math.random() * DOUGLAS_ADAMS_QUOTES.length)];
+    const tier = this.highestTierTitle(member);
+    const displayName = member.discordUserId
+      ? `<@${member.discordUserId}>`
+      : `**${escapeMarkdown(member.fullName ?? `Patreon member ${member.id}`)}**`;
+    const mentionedUserIds = member.discordUserId ? [member.discordUserId] : [];
+    const content = [
+      `"${quote}"`,
+      "",
+      `Please give a huge Bitflip thank you to ${displayName} for subscribing at **${escapeMarkdown(tier)}**.`,
+      "We are massively, spectacularly grateful. Thank you, thank you, thank you."
+    ].join("\n");
+
+    return {
+      member,
+      content,
+      mentionedUserIds
+    };
+  }
+
+  private highestTierTitle(member: PatreonMember): string {
+    const tier = [...member.tiers].sort((left, right) => (right.amountCents ?? 0) - (left.amountCents ?? 0))[0];
+    return tier?.title ?? "a Patreon tier";
+  }
+
+  private async announceNewPatrons(
+    guild: Guild,
+    announcements: PatronAnnouncement[],
+    dryRun: boolean,
+    errors: string[]
+  ): Promise<void> {
+    if (!this.options.announcementsEnabled || announcements.length === 0) {
+      return;
+    }
+    if (dryRun) {
+      this.logger.info("Dry run enabled; not sending patron announcements", { announcements: announcements.length });
+      return;
+    }
+
+    const channel = this.findAnnouncementChannel(guild);
+    if (!channel) {
+      errors.push(`Announcement channel "#${this.options.announcementChannelName}" was not found or cannot accept messages.`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    for (const announcement of announcements) {
+      try {
+        await channel.send({
+          content: announcement.content,
+          allowedMentions: { users: announcement.mentionedUserIds }
+        });
+        this.database.recordPatronAnnouncement(announcement.member.id, ACTIVE_PATRON_ANNOUNCEMENT, now);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`Unable to announce Patreon member ${announcement.member.id}: ${message}`);
+      }
+    }
+  }
+
+  private findAnnouncementChannel(guild: Guild): (GuildBasedChannel & SendableChannel) | null {
+    const channelName = this.normalizeChannelName(this.options.announcementChannelName);
+    return (
+      guild.channels.cache.find(
+        (channel): channel is GuildBasedChannel & SendableChannel =>
+          this.normalizeChannelName(channel.name) === channelName && channel.isTextBased() && this.isSendableChannel(channel)
+      ) ?? null
+    );
+  }
+
+  private normalizeChannelName(name: string): string {
+    return name.replace(/^#/, "").trim().toLowerCase();
+  }
+
+  private isSendableChannel(channel: GuildBasedChannel): channel is GuildBasedChannel & SendableChannel {
+    return typeof (channel as GuildBasedChannel & { send?: unknown }).send === "function";
   }
 
   private async applyRoleChanges(
@@ -272,6 +419,7 @@ export class SyncService {
       campaignLifetimeSupportCents: member.campaignLifetimeSupportCents,
       tierIds: member.tiers.map((tier) => tier.id),
       tierTitles: member.tiers.map((tier) => tier.title ?? tier.id),
+      tierAmountsCents: member.tiers.map((tier) => tier.amountCents ?? 0),
       roleIds,
       lastSeenAt: now
     };

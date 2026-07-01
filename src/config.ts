@@ -15,6 +15,18 @@ const envSchema = z.object({
   PATREON_OAUTH_SCOPES: z.string().optional().default("identity identity[email] campaigns campaigns.members"),
   PATREON_SETUP_TOKEN: z.string().optional().default(""),
   PATREON_TIER_ROLE_MAP: z.string().optional().default(""),
+  MANAGE_DISCORD_ROLES: z
+    .string()
+    .optional()
+    .default("false")
+    .transform((value) => parseBoolean(value)),
+  ANNOUNCEMENTS_ENABLED: z
+    .string()
+    .optional()
+    .default("true")
+    .transform((value) => parseBoolean(value)),
+  ANNOUNCEMENT_CHANNEL_NAME: z.string().optional().default("chit-chat"),
+  THANKS_TIER_NAME: z.string().optional().default("terrabyte"),
   DATABASE_PATH: z.string().optional().default("./data/patreon-bot.sqlite"),
   SYNC_INTERVAL_MINUTES: z.coerce.number().int().positive().optional().default(60),
   SYNC_ON_START: z
@@ -82,6 +94,10 @@ export const config = {
   patreonOAuthScopes: parsed.data.PATREON_OAUTH_SCOPES.split(/\s+/).filter(Boolean),
   patreonSetupToken: parsed.data.PATREON_SETUP_TOKEN,
   patreonTierRoleMap: parseTierRoleMap(parsed.data.PATREON_TIER_ROLE_MAP),
+  manageDiscordRoles: parsed.data.MANAGE_DISCORD_ROLES,
+  announcementsEnabled: parsed.data.ANNOUNCEMENTS_ENABLED,
+  announcementChannelName: parsed.data.ANNOUNCEMENT_CHANNEL_NAME.replace(/^#/, ""),
+  thanksTierName: parsed.data.THANKS_TIER_NAME,
   databasePath: parsed.data.DATABASE_PATH,
   syncIntervalMinutes: parsed.data.SYNC_INTERVAL_MINUTES,
   syncOnStart: parsed.data.SYNC_ON_START,

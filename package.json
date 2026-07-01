@@ -1,7 +1,7 @@
 {
   "name": "patreon-discord-bot",
   "version": "0.1.0",
-  "description": "Self-hostable Discord bot for syncing podcast Patreon members to Discord roles.",
+  "description": "Self-hostable Discord bot for tracking podcast Patreon members and Discord thank-yous.",
   "private": true,
   "license": "MIT",
   "scripts": {

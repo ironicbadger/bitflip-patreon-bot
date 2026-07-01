@@ -1,15 +1,15 @@
 # Patreon Discord Bot
 
-A self-hostable Discord bot for podcasts and memberships that syncs active Patreon members to Discord roles. It stores a local SQLite history, supports scheduled syncs, can react to Patreon webhooks, and exposes `/patreon` admin commands in your Discord server.
+A self-hostable Discord bot for podcasts and memberships that tracks active Patreon members, announces new patrons in Discord, and can optionally sync Patreon roles. It stores a local SQLite history, supports scheduled syncs, can react to Patreon webhooks, and exposes `/patreon` admin commands in your Discord server.
 
 ## What It Does
 
 - Pulls Patreon campaign members from the Patreon API v2.
 - Reads each member's linked Discord account from Patreon `social_connections`.
-- Maps Patreon tiers to Discord roles using Patreon tier `discord_role_ids`.
-- Supports a manual tier-to-role fallback with `PATREON_TIER_ROLE_MAP`.
-- Adds missing roles for active patrons.
-- Removes only roles the bot previously granted when a member stops qualifying.
+- Announces newly active patrons in a public Discord channel.
+- Lists high-tier patrons with `/patreon saythanks`.
+- Can optionally map Patreon tiers to Discord roles using Patreon tier `discord_role_ids`.
+- Can optionally use a manual tier-to-role fallback with `PATREON_TIER_ROLE_MAP`.
 - Keeps sync history and patron state in SQLite.
 - Offers a webhook endpoint at `/webhooks/patreon` and a health check at `/healthz`.
 
@@ -19,7 +19,8 @@ A self-hostable Discord bot for podcasts and memberships that syncs active Patre
 - A Discord application with a bot token.
 - A Patreon creator access token with campaign member access.
 - Patreon members must have connected Discord on Patreon for automatic Discord user matching.
-- The Discord bot needs `Manage Roles`, and its highest role must sit above every patron role it manages.
+- The Discord bot needs permission to view and send messages in the announcement channel.
+- If you enable role management, the Discord bot needs `Manage Roles`, and its highest role must sit above every patron role it manages.
 - Enable the Discord server members intent for the bot in the Discord Developer Portal.
 
 ## Setup
@@ -59,6 +60,9 @@ A self-hostable Discord bot for podcasts and memberships that syncs active Patre
    - `PATREON_CAMPAIGN_ID`: optional if your OAuth account has one campaign; the setup flow can save it automatically.
    - `PATREON_ACCESS_TOKEN`, `PATREON_REFRESH_TOKEN`: optional if you use the OAuth setup flow.
    - `PATREON_WEBHOOK_SECRET`: optional. Add it if you configure a Patreon webhook.
+   - `MANAGE_DISCORD_ROLES`: keep this `false` when the official Patreon Discord bot manages roles.
+   - `ANNOUNCEMENT_CHANNEL_NAME`: the public channel for new patron thanks, such as `chit-chat`.
+   - `THANKS_TIER_NAME`: the tier name used by `/patreon saythanks`, such as `terrabyte`.
 
 4. Install dependencies and register Discord slash commands:
 
@@ -145,11 +149,25 @@ Host-specific reverse proxy labels, DNS, and secrets should live in your infra r
 - `/patreon sync`: run a sync now.
 - `/patreon sync dry_run:true`: preview role changes without applying them.
 - `/patreon status`: show the latest sync summary and local counts.
+- `/patreon test`: show bot runtime, Patreon, role-management, and announcement configuration.
+- `/patreon saythanks`: list active patrons at the configured high-tier threshold or higher.
 - `/patreon member user:@name`: inspect a tracked Patreon link for one Discord user.
 
 Only Discord administrators can use these commands by default. To also allow a staff role, set `COMMAND_ALLOWLIST_ROLE_IDS` to a comma-separated list of Discord role IDs.
 
+## Patron Announcements
+
+Set `ANNOUNCEMENTS_ENABLED=true` and `ANNOUNCEMENT_CHANNEL_NAME=chit-chat` to thank newly active patrons in that channel. The bot records which Patreon member IDs it has announced so normal syncs do not repeatedly thank the same person.
+
+The first sync against an empty database does not backfill announcements for everyone already active. After at least one sync has been recorded, newly discovered active patrons and patrons who become active again are announced.
+
 ## Tier Mapping
+
+Role management is disabled by default so this bot does not conflict with the official Patreon Discord bot. Enable it only if you want this bot to manage roles itself:
+
+```env
+MANAGE_DISCORD_ROLES=true
+```
 
 The best path is to configure Patreon tiers with Discord benefits so Patreon exposes `discord_role_ids`. If you need a fallback, set:
 
@@ -173,6 +191,7 @@ Webhooks trigger a full sync rather than trusting the webhook payload alone, whi
 ## Notes
 
 - Set `DRY_RUN=true` for first launch if you want to verify the counts before applying Discord role changes.
-- The bot only removes role grants it has recorded in SQLite. It will not strip manually assigned roles that predate the bot.
+- When `MANAGE_DISCORD_ROLES=false`, the bot never adds or removes Discord roles.
+- When role management is enabled, the bot only removes role grants it has recorded in SQLite. It will not strip manually assigned roles that predate the bot.
 - If Patreon tokens expire and refresh credentials are not configured, the next sync will fail until you provide a new access token.
 - This implementation follows the current Patreon API v2 member shape and Discord role-management constraints. Useful references: [Patreon API docs](https://docs.patreon.com/) and [Discord Developer Docs](https://discord.com/developers/docs/intro).

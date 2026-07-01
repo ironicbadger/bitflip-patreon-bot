@@ -37,7 +37,10 @@ const patreonClient = new PatreonClient(
 const syncService = new SyncService(client, patreonClient, database, logger, {
   guildId: config.discordGuildId,
   dryRun: config.dryRun,
-  tierRoleMap: config.patreonTierRoleMap
+  tierRoleMap: config.patreonTierRoleMap,
+  manageDiscordRoles: config.manageDiscordRoles,
+  announcementsEnabled: config.announcementsEnabled,
+  announcementChannelName: config.announcementChannelName
 });
 
 const webhookServer = new WebhookServer(syncService, patreonClient, database, logger, {
@@ -89,7 +92,11 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
       patreonClient,
       syncService,
       allowlistRoleIds: config.commandAllowlistRoleIds,
-      startedAt
+      startedAt,
+      manageDiscordRoles: config.manageDiscordRoles,
+      announcementsEnabled: config.announcementsEnabled,
+      announcementChannelName: config.announcementChannelName,
+      thanksTierName: config.thanksTierName
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

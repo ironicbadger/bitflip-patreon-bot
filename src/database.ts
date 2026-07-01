@@ -17,6 +17,7 @@ interface PatronRow {
   campaign_lifetime_support_cents: number | null;
   tier_ids_json: string;
   tier_titles_json: string;
+  tier_amounts_cents_json: string;
   role_ids_json: string;
   last_seen_at: string;
 }
@@ -76,6 +77,7 @@ export class AppDatabase {
         campaign_lifetime_support_cents,
         tier_ids_json,
         tier_titles_json,
+        tier_amounts_cents_json,
         role_ids_json,
         last_seen_at,
         updated_at
@@ -94,6 +96,7 @@ export class AppDatabase {
         @campaignLifetimeSupportCents,
         @tierIdsJson,
         @tierTitlesJson,
+        @tierAmountsCentsJson,
         @roleIdsJson,
         @lastSeenAt,
         @updatedAt
@@ -111,6 +114,7 @@ export class AppDatabase {
         campaign_lifetime_support_cents = excluded.campaign_lifetime_support_cents,
         tier_ids_json = excluded.tier_ids_json,
         tier_titles_json = excluded.tier_titles_json,
+        tier_amounts_cents_json = excluded.tier_amounts_cents_json,
         role_ids_json = excluded.role_ids_json,
         last_seen_at = excluded.last_seen_at,
         updated_at = excluded.updated_at
@@ -122,6 +126,7 @@ export class AppDatabase {
           ...record,
           tierIdsJson: JSON.stringify(record.tierIds),
           tierTitlesJson: JSON.stringify(record.tierTitles),
+          tierAmountsCentsJson: JSON.stringify(record.tierAmountsCents),
           roleIdsJson: JSON.stringify(record.roleIds),
           updatedAt: new Date().toISOString()
         });
@@ -131,11 +136,38 @@ export class AppDatabase {
     insertMany(records);
   }
 
+  getPatronByMemberId(memberId: string): PatronRecord | null {
+    const row = this.db.prepare("SELECT * FROM patrons WHERE member_id = ?").get(memberId) as PatronRow | undefined;
+    return row ? this.patronFromRow(row) : null;
+  }
+
   getPatronByDiscordUserId(discordUserId: string): PatronRecord | null {
     const row = this.db
       .prepare("SELECT * FROM patrons WHERE discord_user_id = ? ORDER BY last_seen_at DESC LIMIT 1")
       .get(discordUserId) as PatronRow | undefined;
     return row ? this.patronFromRow(row) : null;
+  }
+
+  listActivePatrons(): PatronRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM patrons WHERE patron_status = 'active_patron' ORDER BY LOWER(COALESCE(full_name, member_id))")
+      .all() as PatronRow[];
+    return rows.map((row) => this.patronFromRow(row)).filter((record) => record.tierIds.length > 0);
+  }
+
+  hasPatronAnnouncement(memberId: string, kind: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 AS found FROM patron_announcements WHERE member_id = ? AND kind = ? LIMIT 1")
+      .get(memberId, kind) as { found: number } | undefined;
+    return Boolean(row);
+  }
+
+  recordPatronAnnouncement(memberId: string, kind: string, now: string): void {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO patron_announcements (member_id, kind, announced_at) VALUES (?, ?, ?)"
+      )
+      .run(memberId, kind, now);
   }
 
   getActiveRoleGrants(): RoleGrant[] {
@@ -300,6 +332,7 @@ export class AppDatabase {
         campaign_lifetime_support_cents INTEGER,
         tier_ids_json TEXT NOT NULL DEFAULT '[]',
         tier_titles_json TEXT NOT NULL DEFAULT '[]',
+        tier_amounts_cents_json TEXT NOT NULL DEFAULT '[]',
         role_ids_json TEXT NOT NULL DEFAULT '[]',
         last_seen_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -317,6 +350,13 @@ export class AppDatabase {
         revoked_at TEXT,
         last_seen_at TEXT NOT NULL,
         PRIMARY KEY(discord_user_id, role_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS patron_announcements (
+        member_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        announced_at TEXT NOT NULL,
+        PRIMARY KEY(member_id, kind)
       );
 
       CREATE TABLE IF NOT EXISTS sync_runs (
@@ -343,6 +383,14 @@ export class AppDatabase {
         updated_at TEXT NOT NULL
       );
     `);
+    this.ensureColumn("patrons", "tier_amounts_cents_json", "tier_amounts_cents_json TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  private ensureColumn(tableName: string, columnName: string, definition: string): void {
+    const rows = this.db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
+    if (!rows.some((row) => row.name === columnName)) {
+      this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+    }
   }
 
   private patronFromRow(row: PatronRow): PatronRecord {
@@ -360,6 +408,7 @@ export class AppDatabase {
       campaignLifetimeSupportCents: row.campaign_lifetime_support_cents,
       tierIds: JSON.parse(row.tier_ids_json) as string[],
       tierTitles: JSON.parse(row.tier_titles_json) as string[],
+      tierAmountsCents: JSON.parse(row.tier_amounts_cents_json) as number[],
       roleIds: JSON.parse(row.role_ids_json) as string[],
       lastSeenAt: row.last_seen_at
     };
