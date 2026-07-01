@@ -149,7 +149,6 @@ Host-specific reverse proxy labels, DNS, and secrets should live in your infra r
 - `/patreon sync`: run a sync now.
 - `/patreon sync dry_run:true`: preview role changes without applying them.
 - `/patreon status`: show the latest sync summary and local counts.
-- `/patreon test`: show bot runtime, Patreon, role-management, and announcement configuration.
 - `/patreon saythanks`: list active patrons at the configured high-tier threshold or higher.
 - `/patreon member user:@name`: inspect a tracked Patreon link for one Discord user.
 

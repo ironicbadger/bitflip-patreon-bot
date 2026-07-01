@@ -15,7 +15,6 @@ import { WebhookServer } from "./webhookServer";
 
 const logger = new Logger(config.logLevel);
 const database = new AppDatabase(config.databasePath);
-const startedAt = new Date();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
@@ -89,13 +88,8 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   try {
     await handlePatreonCommand(interaction, {
       database,
-      patreonClient,
       syncService,
       allowlistRoleIds: config.commandAllowlistRoleIds,
-      startedAt,
-      manageDiscordRoles: config.manageDiscordRoles,
-      announcementsEnabled: config.announcementsEnabled,
-      announcementChannelName: config.announcementChannelName,
       thanksTierName: config.thanksTierName
     });
   } catch (error) {

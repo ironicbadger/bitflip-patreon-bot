@@ -6,7 +6,6 @@ import {
   SlashCommandBuilder
 } from "discord.js";
 import type { AppDatabase } from "./database";
-import type { PatreonClient } from "./patreonClient";
 import type { SyncService } from "./syncService";
 import type { PatronRecord } from "./types";
 
@@ -20,7 +19,6 @@ export const patreonCommand = new SlashCommandBuilder()
       .addBooleanOption((option) => option.setName("dry_run").setDescription("Preview role changes without applying them"))
   )
   .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show the latest Patreon sync status"))
-  .addSubcommand((subcommand) => subcommand.setName("test").setDescription("Show bot runtime and configuration status"))
   .addSubcommand((subcommand) =>
     subcommand.setName("saythanks").setDescription("List active high-tier patrons to thank")
   )
@@ -33,13 +31,8 @@ export const patreonCommand = new SlashCommandBuilder()
 
 interface CommandContext {
   database: AppDatabase;
-  patreonClient: PatreonClient;
   syncService: SyncService;
   allowlistRoleIds: string[];
-  startedAt: Date;
-  manageDiscordRoles: boolean;
-  announcementsEnabled: boolean;
-  announcementChannelName: string;
   thanksTierName: string;
 }
 
@@ -71,29 +64,6 @@ export async function handlePatreonCommand(
     const content = latest
       ? `${formatSyncRun(latest)}\n\nTracked patrons: ${counts.patrons}\nLinked patrons: ${counts.linkedPatrons}\nActive role grants: ${counts.activeRoleGrants}`
       : "No Patreon sync has run yet.";
-    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  if (subcommand === "test") {
-    const latest = context.database.getLatestSyncRun();
-    const counts = context.database.getCounts();
-    const readyAt = interaction.client.readyAt?.toISOString() ?? "not ready";
-    const content = [
-      `Bot: ${interaction.client.user?.tag ?? "unknown"}`,
-      `Discord ready: ${interaction.client.isReady() ? "yes" : "no"}`,
-      `Ready at: ${readyAt}`,
-      `Process uptime: ${formatDuration(Date.now() - context.startedAt.getTime())}`,
-      `Guild: ${interaction.guild?.name ?? "unknown"} (${interaction.guildId ?? "unknown"})`,
-      `Patreon OAuth config: ${context.patreonClient.hasOAuthClientCredentials() ? "ready" : "missing"}`,
-      `Patreon sync config: ${context.patreonClient.hasSyncConfiguration() ? "ready" : "missing campaign/token"}`,
-      `Role management: ${context.manageDiscordRoles ? "enabled" : "disabled"}`,
-      `Announcements: ${context.announcementsEnabled ? `enabled (#${context.announcementChannelName})` : "disabled"}`,
-      `Tracked patrons: ${counts.patrons}`,
-      `Linked patrons: ${counts.linkedPatrons}`,
-      `Active role grants: ${counts.activeRoleGrants}`,
-      `Latest sync: ${latest ? `${latest.status} at ${latest.finishedAt}` : "none"}`
-    ].join("\n");
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
     return;
   }
@@ -210,23 +180,6 @@ function fitDiscordMessage(lines: string[]): string {
   }
 
   return kept.join("\n");
-}
-
-function formatDuration(milliseconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  const parts = [
-    days > 0 ? `${days}d` : null,
-    hours > 0 ? `${hours}h` : null,
-    minutes > 0 ? `${minutes}m` : null,
-    `${seconds}s`
-  ].filter((part): part is string => Boolean(part));
-
-  return parts.join(" ");
 }
 
 function formatSyncRun(result: {
