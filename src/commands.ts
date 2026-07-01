@@ -6,6 +6,7 @@ import {
   SlashCommandBuilder
 } from "discord.js";
 import type { AppDatabase } from "./database";
+import type { PatreonClient } from "./patreonClient";
 import type { SyncService } from "./syncService";
 
 export const patreonCommand = new SlashCommandBuilder()
@@ -18,6 +19,7 @@ export const patreonCommand = new SlashCommandBuilder()
       .addBooleanOption((option) => option.setName("dry_run").setDescription("Preview role changes without applying them"))
   )
   .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show the latest Patreon sync status"))
+  .addSubcommand((subcommand) => subcommand.setName("test").setDescription("Show bot runtime and configuration status"))
   .addSubcommand((subcommand) =>
     subcommand
       .setName("member")
@@ -27,8 +29,10 @@ export const patreonCommand = new SlashCommandBuilder()
 
 interface CommandContext {
   database: AppDatabase;
+  patreonClient: PatreonClient;
   syncService: SyncService;
   allowlistRoleIds: string[];
+  startedAt: Date;
 }
 
 export async function handlePatreonCommand(
@@ -63,6 +67,27 @@ export async function handlePatreonCommand(
     return;
   }
 
+  if (subcommand === "test") {
+    const latest = context.database.getLatestSyncRun();
+    const counts = context.database.getCounts();
+    const readyAt = interaction.client.readyAt?.toISOString() ?? "not ready";
+    const content = [
+      `Bot: ${interaction.client.user?.tag ?? "unknown"}`,
+      `Discord ready: ${interaction.client.isReady() ? "yes" : "no"}`,
+      `Ready at: ${readyAt}`,
+      `Process uptime: ${formatDuration(Date.now() - context.startedAt.getTime())}`,
+      `Guild: ${interaction.guild?.name ?? "unknown"} (${interaction.guildId ?? "unknown"})`,
+      `Patreon OAuth config: ${context.patreonClient.hasOAuthClientCredentials() ? "ready" : "missing"}`,
+      `Patreon sync config: ${context.patreonClient.hasSyncConfiguration() ? "ready" : "missing campaign/token"}`,
+      `Tracked patrons: ${counts.patrons}`,
+      `Linked patrons: ${counts.linkedPatrons}`,
+      `Active role grants: ${counts.activeRoleGrants}`,
+      `Latest sync: ${latest ? `${latest.status} at ${latest.finishedAt}` : "none"}`
+    ].join("\n");
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   if (subcommand === "member") {
     const user = interaction.options.getUser("user", true);
     const patron = context.database.getPatronByDiscordUserId(user.id);
@@ -77,6 +102,23 @@ export async function handlePatreonCommand(
       : `No tracked Patreon member is linked to ${user.tag}.`;
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
   }
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts = [
+    days > 0 ? `${days}d` : null,
+    hours > 0 ? `${hours}h` : null,
+    minutes > 0 ? `${minutes}m` : null,
+    `${seconds}s`
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(" ");
 }
 
 function formatSyncRun(result: {
