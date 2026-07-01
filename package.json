@@ -1,0 +1,32 @@
+{
+  "name": "patreon-discord-bot",
+  "version": "0.1.0",
+  "description": "Self-hostable Discord bot for syncing podcast Patreon members to Discord roles.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "deploy:commands": "tsx src/registerCommands.ts",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "discord.js": "^14.26.4",
+    "dotenv": "^16.4.7",
+    "zod": "^4.4.3"
+  },
+  "overrides": {
+    "undici": "6.27.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.20.5",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
